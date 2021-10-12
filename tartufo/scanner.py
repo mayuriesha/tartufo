@@ -130,7 +130,7 @@ class ScannerBase(abc.ABC):
     all the individual pieces of content to be scanned.
     """
 
-    _issues: Optional[List[Issue]] = None
+    _issue_count: int = -1
     _included_paths: Optional[List[Pattern]] = None
     _excluded_paths: Optional[List[Pattern]] = None
     _excluded_entropy: Optional[List[Rule]] = None
@@ -143,18 +143,16 @@ class ScannerBase(abc.ABC):
         self.logger = logging.getLogger(__name__)
 
     @property
-    def issues(self) -> List[Issue]:
+    def issues(self) -> Generator[Issue, None, None]:
         """Get a list of issues found during the scan.
 
         If a scan has not yet been run, run it.
 
         :return: Any issues found during the scan.
-        :rtype: List[Issue]
         """
-        if self._issues is None:
+        if self._issue_count < 0:
             self.logger.debug("Issues called before scan. Calling scan now.")
-            self._issues = self.scan()
-        return self._issues
+            yield from self.scan()
 
     @property
     def included_paths(self) -> List[Pattern]:
@@ -336,7 +334,7 @@ class ScannerBase(abc.ABC):
                 entropy += -prob_x * math.log2(prob_x)
         return entropy
 
-    def scan(self) -> List[Issue]:
+    def scan(self) -> Generator[Issue, None, None]:
         """Run the requested scans against the target data.
 
         This will iterate through all chunks of data as provided by the scanner
@@ -346,7 +344,7 @@ class ScannerBase(abc.ABC):
         :raises types.TartufoConfigException: If there were problems with the
           scanner's configuration
         """
-        issues: List[Issue] = []
+
         if not any((self.global_options.entropy, self.global_options.regex)):
             self.logger.error("No analysis requested.")
             raise types.ConfigException("No analysis requested.")
@@ -355,38 +353,35 @@ class ScannerBase(abc.ABC):
             raise types.ConfigException("Regex checks requested, but no regexes found.")
 
         self.logger.info("Starting scan...")
+        self._issue_count = 0
         for chunk in self.chunks:
             # Run regex scans first to trigger a potential fast fail for bad config
             if self.global_options.regex and self.rules_regexes:
-                issues += self.scan_regex(chunk)
+                yield from self.scan_regex(chunk)
             if self.global_options.entropy:
-                issues += self.scan_entropy(chunk)
-        self._issues = issues
-        self.logger.info("Found %d issues.", len(self._issues))
-        return self._issues
+                yield from self.scan_entropy(chunk)
+        self.logger.info("Found %d issues.", self._issue_count)
 
-    def scan_entropy(self, chunk: types.Chunk) -> List[Issue]:
+    def scan_entropy(self, chunk: types.Chunk) -> Generator[Issue, None, None]:
         """Scan a chunk of data for apparent high entropy.
 
         :param chunk: The chunk of data to be scanned
         """
-        issues: List[Issue] = []
+
         for line in chunk.contents.split("\n"):
             for word in line.split():
                 b64_strings = util.get_strings_of_set(word, BASE64_CHARS)
                 hex_strings = util.get_strings_of_set(word, HEX_CHARS)
 
                 for string in b64_strings:
-                    issues += self.evaluate_entropy_string(
+                    yield from self.evaluate_entropy_string(
                         chunk, line, string, BASE64_CHARS, 4.5
                     )
 
                 for string in hex_strings:
-                    issues += self.evaluate_entropy_string(
+                    yield from self.evaluate_entropy_string(
                         chunk, line, string, HEX_CHARS, 3
                     )
-
-        return issues
 
     def evaluate_entropy_string(
         self,
@@ -395,7 +390,7 @@ class ScannerBase(abc.ABC):
         string: str,
         chars: str,
         min_entropy_score: float,
-    ) -> List[Issue]:
+    ) -> Generator[Issue, None, None]:
         """
         Check entropy string using entropy characters and score.
 
@@ -404,7 +399,7 @@ class ScannerBase(abc.ABC):
         :param string: String to check
         :param chars: Characters to calculate score
         :param min_entropy_score: Minimum entropy score to flag
-        return: List of issues flagged
+        return: Iterator of issues flagged
         """
         if not self.signature_is_excluded(string, chunk.file_path):
             entropy_score = self.calculate_entropy(string, chars)
@@ -412,15 +407,15 @@ class ScannerBase(abc.ABC):
                 if self.entropy_string_is_excluded(line, chunk.file_path):
                     self.logger.debug("line containing entropy was excluded: %s", line)
                 else:
-                    return [Issue(types.IssueType.Entropy, string, chunk)]
-        return []
+                    self._issue_count += 1
+                    yield Issue(types.IssueType.Entropy, string, chunk)
 
-    def scan_regex(self, chunk: types.Chunk) -> List[Issue]:
+    def scan_regex(self, chunk: types.Chunk) -> Generator[Issue, None, None]:
         """Scan a chunk of data for matches against the configured regexes.
 
         :param chunk: The chunk of data to be scanned
         """
-        issues: List[Issue] = []
+
         for key, rule in self.rules_regexes.items():
             if rule.path_pattern is None or rule.path_pattern.match(chunk.file_path):
                 found_strings = rule.pattern.findall(chunk.contents)
@@ -429,8 +424,8 @@ class ScannerBase(abc.ABC):
                     if not self.signature_is_excluded(match, chunk.file_path):
                         issue = Issue(types.IssueType.RegEx, match, chunk)
                         issue.issue_detail = key
-                        issues.append(issue)
-        return issues
+                        self._issue_count += 1
+                        yield issue
 
     @property
     @abc.abstractmethod

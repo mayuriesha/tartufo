@@ -33,7 +33,7 @@ class ScanTests(ScannerTestCase):
         self.options.regex = False
         test_scanner = TestScanner(self.options)
         with self.assertRaisesRegex(types.ConfigException, "No analysis requested."):
-            test_scanner.scan()
+            list(test_scanner.scan())
 
     def test_scan_aborts_when_regex_requested_but_none_found(self):
         self.options.regex = True
@@ -42,7 +42,7 @@ class ScanTests(ScannerTestCase):
         with self.assertRaisesRegex(
             types.ConfigException, "Regex checks requested, but no regexes found."
         ):
-            test_scanner.scan()
+            list(test_scanner.scan())
 
     @mock.patch("tartufo.config.configure_regexes")
     def test_scan_aborts_due_to_invalid_regex(self, mock_config: mock.MagicMock):
@@ -54,14 +54,14 @@ class ScanTests(ScannerTestCase):
         with self.assertRaisesRegex(
             types.ConfigException, "Invalid regular expression"
         ):
-            test_scanner.scan()
+            list(test_scanner.scan())
 
     @mock.patch("tartufo.scanner.ScannerBase.scan_entropy")
     def test_scan_iterates_through_all_chunks(self, mock_entropy: mock.MagicMock):
         # Make sure we do at least one type of scan
         self.options.entropy = True
         test_scanner = TestScanner(self.options)
-        test_scanner.scan()
+        list(test_scanner.scan())
         mock_entropy.assert_has_calls(
             (mock.call("foo"), mock.call("bar"), mock.call("baz")), any_order=True
         )
@@ -70,7 +70,7 @@ class ScanTests(ScannerTestCase):
     def test_scan_checks_entropy_if_specified(self, mock_entropy: mock.MagicMock):
         self.options.entropy = True
         test_scanner = TestScanner(self.options)
-        test_scanner.scan()
+        list(test_scanner.scan())
         mock_entropy.assert_called()
 
     @mock.patch("tartufo.scanner.ScannerBase.scan_regex")
@@ -78,7 +78,7 @@ class ScanTests(ScannerTestCase):
         self.options.regex = True
         self.options.default_regexes = True
         test_scanner = TestScanner(self.options)
-        test_scanner.scan()
+        list(test_scanner.scan())
         mock_regex.assert_called()
 
 
@@ -86,15 +86,13 @@ class IssuesTests(ScannerTestCase):
     @mock.patch("tartufo.scanner.ScannerBase.scan")
     def test_empty_issue_list_causes_scan(self, mock_scan: mock.MagicMock):
         test_scanner = TestScanner(self.options)
-        test_scanner.issues  # pylint: disable=pointless-statement
+        list(test_scanner.issues)  # pylint: disable=pointless-statement
         mock_scan.assert_called()
 
     @mock.patch("tartufo.scanner.ScannerBase.scan")
-    def test_populated_issues_list_does_not_rescan(self, mock_scan: mock.MagicMock):
+    def test_scanner_does_not_rescan(self, mock_scan: mock.MagicMock):
         test_scanner = TestScanner(self.options)
-        test_scanner._issues = [  # pylint: disable=protected-access
-            scanner.Issue(types.IssueType.RegEx, "foo", types.Chunk("foo", "bar", {}))
-        ]
+        test_scanner._issue_count = 0  # pylint: disable=protected-access
         test_scanner.issues  # pylint: disable=pointless-statement
         mock_scan.assert_not_called()
 
@@ -294,7 +292,7 @@ class RegexScanTests(ScannerTestCase):
             "not-found": Rule(name=None, pattern=rule_3, path_pattern=rule_3_path),
         }
         chunk = types.Chunk("foo", "/file/path", {})
-        test_scanner.scan_regex(chunk)
+        list(test_scanner.scan_regex(chunk))
         rule_1.findall.assert_called_once_with("foo")
         rule_2.findall.assert_called_once_with("foo")
         rule_2_path.match.assert_called_once_with("/file/path")
@@ -311,7 +309,7 @@ class RegexScanTests(ScannerTestCase):
             "foo": Rule(name=None, pattern=re.compile("foo"), path_pattern=None)
         }
         chunk = types.Chunk("foo", "bar", {})
-        issues = test_scanner.scan_regex(chunk)
+        issues = list(test_scanner.scan_regex(chunk))
         mock_signature.assert_called_once_with("foo", "bar")
         self.assertEqual(issues, [])
 
@@ -325,7 +323,7 @@ class RegexScanTests(ScannerTestCase):
             "foo": Rule(name=None, pattern=re.compile("foo"), path_pattern=None)
         }
         chunk = types.Chunk("foo", "bar", {})
-        issues = test_scanner.scan_regex(chunk)
+        issues = list(test_scanner.scan_regex(chunk))
         mock_signature.assert_called_once_with("foo", "bar")
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0].issue_detail, "foo")
@@ -391,7 +389,7 @@ class EntropyTests(ScannerTestCase):
         self, mock_strings: mock.MagicMock
     ):
         mock_strings.return_value = []
-        self.scanner.scan_entropy(self.chunk)
+        list(self.scanner.scan_entropy(self.chunk))
         mock_strings.assert_has_calls(
             (
                 mock.call("foo", scanner.BASE64_CHARS),
@@ -414,7 +412,7 @@ class EntropyTests(ScannerTestCase):
     ):
         mock_strings.side_effect = (["foo"], [], [], [], [], [])
         mock_signature.return_value = True
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         mock_calculate.assert_not_called()
         self.assertEqual(issues, [])
 
@@ -429,7 +427,7 @@ class EntropyTests(ScannerTestCase):
     ):
         mock_strings.side_effect = ([], ["foo"], [], [], [], [])
         mock_signature.return_value = True
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         mock_calculate.assert_not_called()
         self.assertEqual(issues, [])
 
@@ -445,7 +443,7 @@ class EntropyTests(ScannerTestCase):
         mock_strings.side_effect = (["foo"], [], [], [], [], [])
         mock_signature.return_value = False
         mock_calculate.return_value = 9.0
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0].issue_type, types.IssueType.Entropy)
         self.assertEqual(issues[0].matched_string, "foo")
@@ -462,7 +460,7 @@ class EntropyTests(ScannerTestCase):
         mock_strings.side_effect = ([], ["foo"], [], [], [], [])
         mock_signature.return_value = False
         mock_calculate.return_value = 9.0
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0].issue_type, types.IssueType.Entropy)
         self.assertEqual(issues[0].matched_string, "foo")
@@ -482,7 +480,7 @@ class EntropyTests(ScannerTestCase):
         mock_entropy.return_value = True
         mock_signature.return_value = False
         mock_calculate.return_value = 9.0
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         self.assertEqual(len(issues), 0)
 
     @mock.patch("tartufo.scanner.ScannerBase.calculate_entropy")
@@ -500,7 +498,7 @@ class EntropyTests(ScannerTestCase):
         mock_entropy.return_value = True
         mock_signature.return_value = False
         mock_calculate.return_value = 9.0
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         self.assertEqual(len(issues), 0)
 
     @mock.patch("tartufo.scanner.ScannerBase.calculate_entropy")
@@ -515,7 +513,7 @@ class EntropyTests(ScannerTestCase):
         mock_strings.side_effect = (["foo"], [], [], [], [], [])
         mock_signature.return_value = False
         mock_calculate.return_value = 1.0
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         self.assertEqual(len(issues), 0)
 
     @mock.patch("tartufo.scanner.ScannerBase.calculate_entropy")
@@ -530,7 +528,7 @@ class EntropyTests(ScannerTestCase):
         mock_strings.side_effect = ([], ["foo"], [], [], [], [])
         mock_signature.return_value = False
         mock_calculate.return_value = 1.0
-        issues = self.scanner.scan_entropy(self.chunk)
+        issues = list(self.scanner.scan_entropy(self.chunk))
         self.assertEqual(len(issues), 0)
 
 
