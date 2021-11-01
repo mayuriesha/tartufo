@@ -556,7 +556,9 @@ class GitScanner(ScannerBase, abc.ABC):
     @staticmethod
     def header_length(diff: str) -> int:
         """Compute the length of the git diff header text"""
-        b_file_pos = diff.find("+++")
+        b_file_pos = diff.find("\n+++")
+        if b_file_pos != -1:
+            b_file_pos = b_file_pos + 4  # Retrieving first character after the +++
         final_nl = diff.find("\n", b_file_pos)
         return final_nl + 1
 
